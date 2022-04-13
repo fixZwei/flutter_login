@@ -1,474 +1,685 @@
-library auth_card_builder;
+part of auth_card_builder;
 
-import 'dart:collection';
-import 'dart:math';
+class _LoginCard extends StatefulWidget {
+  const _LoginCard({
+    Key? key,
+    required this.loadingController,
+    required this.userValidator,
+    required this.passwordValidator,
+    required this.onSwitchRecoveryPassword,
+    required this.onSwitchSignUpAdditionalData,
+    required this.userType,
+    required this.requireAdditionalSignUpFields,
+    required this.onSwitchConfirmSignup,
+    required this.requireSignUpConfirmation,
+    required this.requireSignUpConfirmation,
+    this.onSwitchAuth,
+    this.onSubmitCompleted,
+    this.hideForgotPasswordButton = false,
+    this.hideSignUpButton = false,
+    this.loginAfterSignUp = true,
+    this.hideProvidersTitle = false,
+  }) : super(key: key);
 
-import 'package:another_transformer_page_view/another_transformer_page_view.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter_login/flutter_login.dart';
-import 'package:flutter_login/src/constants.dart';
-import 'package:flutter_login/src/dart_helper.dart';
-import 'package:flutter_login/src/matrix.dart';
-import 'package:flutter_login/src/paddings.dart';
-import 'package:flutter_login/src/utils/text_field_utils.dart';
-import 'package:flutter_login/src/widget_helper.dart';
-import 'package:flutter_login/src/widgets/term_of_service_checkbox.dart';
-import 'package:flutter_signin_button/button_view.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:provider/provider.dart';
-
-import '../../../flutter_login.dart';
-import '../animated_button.dart';
-import '../animated_icon.dart';
-import '../animated_text.dart';
-import '../animated_text_form_field.dart';
-import '../custom_page_transformer.dart';
-import '../expandable_container.dart';
-import '../fade_in.dart';
-
-part 'additional_signup_card.dart';
-part 'login_card.dart';
-part 'recover_card.dart';
-part 'recover_confirm_card.dart';
-part 'signup_confirm_card.dart';
-
-class AuthCard extends StatefulWidget {
-  const AuthCard(
-      {Key? key,
-      required this.userType,
-      this.padding = const EdgeInsets.all(0),
-      required this.loadingController,
-      this.userValidator,
-      this.passwordValidator,
-      this.onSubmit,
-      this.onSubmitCompleted,
-      this.hideForgotPasswordButton = false,
-      this.hideSignUpButton = false,
-      this.loginAfterSignUp = true,
-      this.hideProvidersTitle = false,
-      this.additionalSignUpFields,
-      this.disableCustomPageTransformer = false,
-      this.loginTheme,
-      this.navigateBackAfterRecovery = false,
-      required this.scrollable})
-      : super(key: key);
-
-  final EdgeInsets padding;
   final AnimationController loadingController;
   final FormFieldValidator<String>? userValidator;
   final FormFieldValidator<String>? passwordValidator;
-  final Function? onSubmit;
+  final Function onSwitchRecoveryPassword;
+  final Function onSwitchSignUpAdditionalData;
+  final Function onSwitchConfirmSignup;
+  final Function? onSwitchAuth;
   final Function? onSubmitCompleted;
   final bool hideForgotPasswordButton;
   final bool hideSignUpButton;
   final bool loginAfterSignUp;
-  final LoginUserType userType;
   final bool hideProvidersTitle;
-
-  final List<UserFormField>? additionalSignUpFields;
-
-  final bool disableCustomPageTransformer;
-  final LoginTheme? loginTheme;
-  final bool navigateBackAfterRecovery;
-
-  final bool scrollable;
+  final LoginUserType userType;
+  final bool requireAdditionalSignUpFields;
+  final bool requireSignUpConfirmation;
 
   @override
-  AuthCardState createState() => AuthCardState();
+  _LoginCardState createState() => _LoginCardState();
 }
 
-class AuthCardState extends State<AuthCard> with TickerProviderStateMixin {
-  final GlobalKey _loginCardKey = GlobalKey();
-  final GlobalKey _additionalSignUpCardKey = GlobalKey();
-  final GlobalKey _confirmRecoverCardKey = GlobalKey();
-  final GlobalKey _confirmSignUpCardKey = GlobalKey();
+class _LoginCardState extends State<_LoginCard> with TickerProviderStateMixin {
+  final GlobalKey<FormState> _formKey = GlobalKey();
 
-  static const int _loginPageIndex = 0;
-  static const int _recoveryIndex = 1;
-  static const int _additionalSignUpIndex = 2;
-  static const int _confirmSignup = 3;
-  static const int _confirmRecover = 4;
+  final _passwordFocusNode = FocusNode();
+  final _confirmPasswordFocusNode = FocusNode();
 
-  int _pageIndex = _loginPageIndex;
+  late TextEditingController _nameController;
+  late TextEditingController _passController;
+  late TextEditingController _confirmPassController;
 
-  var _isLoadingFirstTime = true;
-  static const cardSizeScaleEnd = .2;
+  var _isLoading = false;
+  var _isSubmitting = false;
+  var _showShadow = true;
 
-  final TransformerPageController _pageController = TransformerPageController();
-  late AnimationController _formLoadingController;
-  late AnimationController _routeTransitionController;
+  /// switch between login and signup
+  late AnimationController _switchAuthController;
+  late AnimationController _postSwitchAuthController;
+  late AnimationController _submitController;
 
-  // Card specific animations
-  late Animation<double> _flipAnimation;
-  late Animation<double> _cardSizeAnimation;
-  late Animation<double> _cardSize2AnimationX;
-  late Animation<double> _cardSize2AnimationY;
-  late Animation<double> _cardRotationAnimation;
-  late Animation<double> _cardOverlayHeightFactorAnimation;
-  late Animation<double> _cardOverlaySizeAndOpacityAnimation;
+  ///list of AnimationController each one responsible for a authentication provider icon
+  List<AnimationController> _providerControllerList = <AnimationController>[];
+
+  Interval? _nameTextFieldLoadingAnimationInterval;
+  Interval? _passTextFieldLoadingAnimationInterval;
+  Interval? _textButtonLoadingAnimationInterval;
+  late Animation<double> _buttonScaleAnimation;
+
+  bool get buttonEnabled => !_isLoading && !_isSubmitting;
 
   @override
   void initState() {
     super.initState();
 
-    widget.loadingController.addStatusListener((status) {
-      if (status == AnimationStatus.completed) {
-        _isLoadingFirstTime = false;
-        _formLoadingController.forward();
-      }
-    });
+    final auth = Provider.of<Auth>(context, listen: false);
+    _nameController = TextEditingController(text: auth.email);
+    _passController = TextEditingController(text: auth.password);
+    _confirmPassController = TextEditingController(text: auth.confirmPassword);
 
-    // Set all animations
-    _flipAnimation = Tween<double>(begin: pi / 2, end: 0).animate(
-      CurvedAnimation(
-        parent: widget.loadingController,
-        curve: Curves.easeOutBack,
-        reverseCurve: Curves.easeIn,
-      ),
-    );
+    widget.loadingController.addStatusListener(handleLoadingAnimationStatus);
 
-    _formLoadingController = AnimationController(
+    _switchAuthController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1150),
-      reverseDuration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 800),
     );
-
-    _routeTransitionController = AnimationController(
+    _postSwitchAuthController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1100),
+      duration: const Duration(milliseconds: 150),
     );
+    _submitController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
+    _providerControllerList = auth.loginProviders
+        .map(
+          (e) => AnimationController(
+            vsync: this,
+            duration: const Duration(milliseconds: 1000),
+          ),
+        )
+        .toList();
 
-    _cardSizeAnimation = Tween<double>(begin: 1.0, end: cardSizeScaleEnd)
-        .animate(CurvedAnimation(
-      parent: _routeTransitionController,
-      curve: const Interval(0, .27272727 /* ~300ms */,
-          curve: Curves.easeInOutCirc),
+    _nameTextFieldLoadingAnimationInterval = const Interval(0, .85);
+    _passTextFieldLoadingAnimationInterval = const Interval(.15, 1.0);
+    _textButtonLoadingAnimationInterval =
+        const Interval(.6, 1.0, curve: Curves.easeOut);
+    _buttonScaleAnimation =
+        Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
+      parent: widget.loadingController,
+      curve: const Interval(.4, 1.0, curve: Curves.easeOutBack),
     ));
+  }
 
-    // replace 0 with minPositive to pass the test
-    // https://github.com/flutter/flutter/issues/42527#issuecomment-575131275
-    _cardOverlayHeightFactorAnimation =
-        Tween<double>(begin: double.minPositive, end: 1.0)
-            .animate(CurvedAnimation(
-      parent: _routeTransitionController,
-      curve: const Interval(.27272727, .5 /* ~250ms */, curve: Curves.linear),
-    ));
-
-    _cardOverlaySizeAndOpacityAnimation =
-        Tween<double>(begin: 1.0, end: 0).animate(CurvedAnimation(
-      parent: _routeTransitionController,
-      curve: const Interval(.5, .72727272 /* ~250ms */, curve: Curves.linear),
-    ));
-
-    _cardSize2AnimationX =
-        Tween<double>(begin: 1, end: 1).animate(_routeTransitionController);
-
-    _cardSize2AnimationY =
-        Tween<double>(begin: 1, end: 1).animate(_routeTransitionController);
-
-    _cardRotationAnimation =
-        Tween<double>(begin: 0, end: pi / 2).animate(CurvedAnimation(
-      parent: _routeTransitionController,
-      curve: const Interval(.72727272, 1 /* ~300ms */,
-          curve: Curves.easeInOutCubic),
-    ));
+  void handleLoadingAnimationStatus(AnimationStatus status) {
+    if (status == AnimationStatus.forward) {
+      setState(() => _isLoading = true);
+    }
+    if (status == AnimationStatus.completed) {
+      setState(() => _isLoading = false);
+    }
   }
 
   @override
   void dispose() {
-    _formLoadingController.dispose();
-    _pageController.dispose();
-    _routeTransitionController.dispose();
+    widget.loadingController.removeStatusListener(handleLoadingAnimationStatus);
+    _passwordFocusNode.dispose();
+    _confirmPasswordFocusNode.dispose();
+
+    _switchAuthController.dispose();
+    _postSwitchAuthController.dispose();
+    _submitController.dispose();
+
+    for (var controller in _providerControllerList) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
-  void _changeCard(int newCardIndex) {
+  void _switchAuthMode() {
     final auth = Provider.of<Auth>(context, listen: false);
+    final newAuthMode = auth.switchAuth();
 
-    auth.currentCardIndex = newCardIndex;
-
-    setState(() {
-      _pageController.animateToPage(
-        newCardIndex,
-        duration: const Duration(milliseconds: 500),
-        curve: Curves.ease,
-      );
-      _pageIndex = newCardIndex;
-    });
+    if (newAuthMode == AuthMode.signup) {
+      _switchAuthController.forward();
+    } else {
+      _switchAuthController.reverse();
+    }
   }
 
-  Future<void>? runLoadingAnimation() {
-    if (widget.loadingController.isDismissed) {
-      return widget.loadingController.forward().then((_) {
-        if (!_isLoadingFirstTime) {
-          _formLoadingController.forward();
+  Future<bool> _submit() async {
+    // a hack to force unfocus the soft keyboard. If not, after change-route
+    // animation completes, it will trigger rebuilding this widget and show all
+    // textfields and buttons again before going to new route
+    FocusScope.of(context).requestFocus(FocusNode());
+
+    final messages = Provider.of<LoginMessages>(context, listen: false);
+
+    if (!_formKey.currentState!.validate()) {
+      return false;
+    }
+
+    _formKey.currentState!.save();
+    await _submitController.forward();
+    setState(() => _isSubmitting = true);
+    final auth = Provider.of<Auth>(context, listen: false);
+    String? error;
+
+    auth.authType = AuthType.userPassword;
+
+    if (auth.isLogin) {
+      error = await auth.onLogin?.call(LoginData(
+        name: auth.email,
+        password: auth.password,
+      ));
+    } else {
+      if (!widget.requireAdditionalSignUpFields) {
+        error = await auth.onSignup!(SignupData.fromSignupForm(
+            name: auth.email,
+            password: auth.password,
+            termsOfService: auth.getTermsOfServiceResults()));
+      }
+    }
+
+    // workaround to run after _cardSizeAnimation in parent finished
+    // need a cleaner way but currently it works so..
+    Future.delayed(const Duration(milliseconds: 270), () {
+      if (mounted) {
+        setState(() => _showShadow = false);
+      }
+    });
+
+    await _submitController.reverse();
+
+    if (!DartHelper.isNullOrEmpty(error)) {
+      showErrorToast(context, messages.flushbarTitleError, error!);
+      Future.delayed(const Duration(milliseconds: 271), () {
+        if (mounted) {
+          setState(() => _showShadow = true);
         }
       });
-    } else if (widget.loadingController.isCompleted) {
-      return _formLoadingController
-          .reverse()
-          .then((_) => widget.loadingController.reverse());
+      setState(() => _isSubmitting = false);
+      return false;
     }
-    return null;
-  }
 
-  Future<void> _forwardChangeRouteAnimation(GlobalKey cardKey) {
-    final deviceSize = MediaQuery.of(context).size;
-    final cardSize = getWidgetSize(cardKey)!;
-    final widthRatio = deviceSize.width / cardSize.height + 2;
-    final heightRatio = deviceSize.height / cardSize.width + .25;
-
-    _cardSize2AnimationX =
-        Tween<double>(begin: 1.0, end: heightRatio / cardSizeScaleEnd)
-            .animate(CurvedAnimation(
-      parent: _routeTransitionController,
-      curve: const Interval(.72727272, 1, curve: Curves.easeInOutCubic),
-    ));
-    _cardSize2AnimationY =
-        Tween<double>(begin: 1.0, end: widthRatio / cardSizeScaleEnd)
-            .animate(CurvedAnimation(
-      parent: _routeTransitionController,
-      curve: const Interval(.72727272, 1, curve: Curves.easeInOutCubic),
-    ));
-
-    widget.onSubmit?.call();
-
-    return _formLoadingController
-        .reverse()
-        .then((_) => _routeTransitionController.forward());
-  }
-
-  void _reverseChangeRouteAnimation() {
-    _routeTransitionController
-        .reverse()
-        .then((_) => _formLoadingController.forward());
-  }
-
-  void runChangeRouteAnimation() {
-    if (_routeTransitionController.isCompleted) {
-      _reverseChangeRouteAnimation();
-    } else if (_routeTransitionController.isDismissed) {
-      _forwardChangeRouteAnimation(_loginCardKey);
+    if (auth.isSignup) {
+      if (widget.requireAdditionalSignUpFields) {
+        widget.onSwitchSignUpAdditionalData();
+        // The login page wil be shown in login mode (used if loginAfterSignUp disabled)
+        _switchAuthMode();
+        return false;
+      } else if (widget.requireSignUpConfirmation) {
+        widget.onSwitchConfirmSignup();
+        _switchAuthMode();
+        return false;
+      } else if (!widget.loginAfterSignUp) {
+        showSuccessToast(
+            context, messages.flushbarTitleSuccess, messages.signUpSuccess);
+        _switchAuthMode();
+        setState(() => _isSubmitting = false);
+        return false;
+      }
     }
+
+    widget.onSubmitCompleted?.call();
+
+    return true;
   }
 
-  void runChangePageAnimation() {
+  Future<bool> _loginProviderSubmit(
+      {required LoginProvider loginProvider,
+      AnimationController? control}) async {
+    if (!loginProvider.animated) {
+      String? error = await loginProvider.callback();
+
+      final messages = Provider.of<LoginMessages>(context, listen: false);
+
+      if (!DartHelper.isNullOrEmpty(error)) {
+        showErrorToast(context, messages.flushbarTitleError, error!);
+        return false;
+      }
+
+      return true;
+    }
+
+    await control?.forward();
+
     final auth = Provider.of<Auth>(context, listen: false);
-    if (auth.currentCardIndex >= 2) {
-      _changeCard(0);
-    } else {
-      _changeCard(auth.currentCardIndex + 1);
-    }
-  }
 
-  Widget _buildLoadingAnimator({Widget? child, required ThemeData theme}) {
-    Widget card;
-    Widget overlay;
+    auth.authType = AuthType.provider;
 
-    // loading at startup
-    card = AnimatedBuilder(
-      animation: _flipAnimation,
-      builder: (context, child) => Transform(
-        transform: Matrix.perspective()..rotateX(_flipAnimation.value),
-        alignment: Alignment.center,
-        child: child,
-      ),
-      child: child,
-    );
+    String? error;
 
-    // change-route transition
-    overlay = Padding(
-      padding: theme.cardTheme.margin!,
-      child: AnimatedBuilder(
-        animation: _cardOverlayHeightFactorAnimation,
-        builder: (context, child) => ClipPath.shape(
-          shape: theme.cardTheme.shape!,
-          child: FractionallySizedBox(
-            heightFactor: _cardOverlayHeightFactorAnimation.value,
-            alignment: Alignment.topCenter,
-            child: child,
-          ),
-        ),
-        child: DecoratedBox(
-          decoration: BoxDecoration(color: theme.colorScheme.secondary),
-        ),
-      ),
-    );
+    error = await loginProvider.callback();
 
-    overlay = ScaleTransition(
-      scale: _cardOverlaySizeAndOpacityAnimation,
-      child: FadeTransition(
-        opacity: _cardOverlaySizeAndOpacityAnimation,
-        child: overlay,
-      ),
-    );
+    // workaround to run after _cardSizeAnimation in parent finished
+    // need a cleaner way but currently it works so..
+    Future.delayed(const Duration(milliseconds: 270), () {
+      if (mounted) {
+        setState(() => _showShadow = false);
+      }
+    });
 
-    return Stack(
-      children: <Widget>[
-        card,
-        Positioned.fill(child: overlay),
-      ],
-    );
-  }
+    await control?.reverse();
 
-  Widget _changeToCard(BuildContext context, int index) {
-    final auth = Provider.of<Auth>(context, listen: false);
-    var formController = _formLoadingController;
-    // if (!_isLoadingFirstTime) formController = _formLoadingController..value = 1.0;
-    switch (index) {
-      case _loginPageIndex:
-        return _buildLoadingAnimator(
-          theme: Theme.of(context),
-          child: _LoginCard(
-            key: _loginCardKey,
-            userType: widget.userType,
-            loadingController: formController,
-            userValidator: widget.userValidator,
-            passwordValidator: widget.passwordValidator,
-            requireAdditionalSignUpFields:
-                widget.additionalSignUpFields != null,
-            onSwitchRecoveryPassword: () => _changeCard(_recoveryIndex),
-            onSwitchSignUpAdditionalData: () =>
-                _changeCard(_additionalSignUpIndex),
-            onSubmitCompleted: () {
-              _forwardChangeRouteAnimation(_loginCardKey).then((_) {
-                widget.onSubmitCompleted!();
-              });
-            },
-            requireSignUpConfirmation: auth.onConfirmSignup != null,
-            onSwitchConfirmSignup: () => _changeCard(_confirmSignup),
-            hideSignUpButton: widget.hideSignUpButton,
-            hideForgotPasswordButton: widget.hideForgotPasswordButton,
-            loginAfterSignUp: widget.loginAfterSignUp,
-            hideProvidersTitle: widget.hideProvidersTitle,
-          ),
-        );
-      case _recoveryIndex:
-        return _RecoverCard(
-            userValidator: widget.userValidator,
-            userType: widget.userType,
-            loginTheme: widget.loginTheme,
-            loadingController: formController,
-            navigateBack: widget.navigateBackAfterRecovery,
-            onBack: () => _changeCard(_loginPageIndex),
-            onSubmitCompleted: () {
-              if (auth.onConfirmRecover != null) {
-                _changeCard(_confirmRecover);
-              } else {
-                _changeCard(_loginPageIndex);
-              }
-            });
+    final messages = Provider.of<LoginMessages>(context, listen: false);
 
-      case _additionalSignUpIndex:
-        if (widget.additionalSignUpFields == null) {
-          return const SizedBox.shrink();
-          // throw StateError('The additional fields List is null');
+    if (!DartHelper.isNullOrEmpty(error)) {
+      showErrorToast(context, messages.flushbarTitleError, error!);
+      Future.delayed(const Duration(milliseconds: 271), () {
+        if (mounted) {
+          setState(() => _showShadow = true);
         }
-        return _buildLoadingAnimator(
-          theme: Theme.of(context),
-          child: _AdditionalSignUpCard(
-            key: _additionalSignUpCardKey,
-            formFields: widget.additionalSignUpFields!,
-            loadingController: formController,
-            onBack: () => _changeCard(_loginPageIndex),
-            loginTheme: widget.loginTheme,
-            onSubmitCompleted: () {
-              if (auth.onConfirmSignup != null) {
-                _changeCard(_confirmSignup);
-              } else if (widget.loginAfterSignUp) {
-                _forwardChangeRouteAnimation(_additionalSignUpCardKey)
-                    .then((_) {
-                  widget.onSubmitCompleted!();
-                });
-              } else {
-                _changeCard(_loginPageIndex);
-              }
-            },
-          ),
-        );
-
-      case _confirmRecover:
-        return _ConfirmRecoverCard(
-          key: _confirmRecoverCardKey,
-          passwordValidator: widget.passwordValidator!,
-          onBack: () => _changeCard(_loginPageIndex),
-          onSubmitCompleted: () => _changeCard(_loginPageIndex),
-        );
-
-      case _confirmSignup:
-        return _buildLoadingAnimator(
-          theme: Theme.of(context),
-          child: _ConfirmSignupCard(
-            key: _confirmSignUpCardKey,
-            onBack: () => auth.additionalSignupData == null
-                ? _changeCard(_loginPageIndex)
-                : _changeCard(_additionalSignUpIndex),
-            loadingController: formController,
-            onSubmitCompleted: () {
-              if (widget.loginAfterSignUp) {
-                _forwardChangeRouteAnimation(_confirmSignUpCardKey).then((_) {
-                  widget.onSubmitCompleted!();
-                });
-              } else {
-                _changeCard(_loginPageIndex);
-              }
-            },
-            loginAfterSignUp: widget.loginAfterSignUp,
-          ),
-        );
+      });
+      return false;
     }
-    throw IndexError(index, 5);
+
+    final showSignupAdditionalFields =
+        await loginProvider.providerNeedsSignUpCallback?.call() ?? false;
+
+    if (showSignupAdditionalFields) {
+      widget.onSwitchSignUpAdditionalData();
+    }
+
+    widget.onSubmitCompleted!();
+
+    return true;
+  }
+
+  Widget _buildUserField(
+    double width,
+    LoginMessages messages,
+    Auth auth,
+  ) {
+    return AnimatedTextFormField(
+      controller: _nameController,
+      width: width,
+      loadingController: widget.loadingController,
+      interval: _nameTextFieldLoadingAnimationInterval,
+      labelText:
+          messages.userHint ?? TextFieldUtils.getLabelText(widget.userType),
+      autofillHints: _isSubmitting
+          ? null
+          : [TextFieldUtils.getAutofillHints(widget.userType)],
+      prefixIcon: TextFieldUtils.getPrefixIcon(widget.userType),
+      keyboardType: TextFieldUtils.getKeyboardType(widget.userType),
+      textInputAction: TextInputAction.next,
+      onFieldSubmitted: (value) {
+        FocusScope.of(context).requestFocus(_passwordFocusNode);
+      },
+      validator: widget.userValidator,
+      onSaved: (value) => auth.email = value!,
+      enabled: !_isSubmitting,
+    );
+  }
+
+  Widget _buildPasswordField(double width, LoginMessages messages, Auth auth) {
+    return AnimatedPasswordTextFormField(
+      animatedWidth: width,
+      loadingController: widget.loadingController,
+      interval: _passTextFieldLoadingAnimationInterval,
+      labelText: messages.passwordHint,
+      autofillHints: _isSubmitting
+          ? null
+          : (auth.isLogin
+              ? [AutofillHints.password]
+              : [AutofillHints.newPassword]),
+      controller: _passController,
+      textInputAction:
+          auth.isLogin ? TextInputAction.done : TextInputAction.next,
+      focusNode: _passwordFocusNode,
+      onFieldSubmitted: (value) {
+        if (auth.isLogin) {
+          _submit();
+        } else {
+          // SignUp
+          FocusScope.of(context).requestFocus(_confirmPasswordFocusNode);
+        }
+      },
+      validator: widget.passwordValidator,
+      onSaved: (value) => auth.password = value!,
+      enabled: !_isSubmitting,
+    );
+  }
+
+  Widget _buildConfirmPasswordField(
+      double width, LoginMessages messages, Auth auth) {
+    return AnimatedPasswordTextFormField(
+      animatedWidth: width,
+      enabled: auth.isSignup,
+      loadingController: widget.loadingController,
+      inertiaController: _postSwitchAuthController,
+      inertiaDirection: TextFieldInertiaDirection.right,
+      labelText: messages.confirmPasswordHint,
+      controller: _confirmPassController,
+      textInputAction: TextInputAction.done,
+      focusNode: _confirmPasswordFocusNode,
+      onFieldSubmitted: (value) => _submit(),
+      validator: auth.isSignup
+          ? (value) {
+              if (value != _passController.text) {
+                return messages.confirmPasswordError;
+              }
+              return null;
+            }
+          : (value) => null,
+      onSaved: (value) => auth.confirmPassword = value!,
+    );
+  }
+
+  Widget _buildForgotPassword(ThemeData theme, LoginMessages messages) {
+    return FadeIn(
+      controller: widget.loadingController,
+      fadeDirection: FadeDirection.bottomToTop,
+      offset: .5,
+      curve: _textButtonLoadingAnimationInterval,
+      child: TextButton(
+        onPressed: buttonEnabled
+            ? () {
+                // save state to populate email field on recovery card
+                _formKey.currentState!.save();
+                widget.onSwitchRecoveryPassword();
+              }
+            : null,
+        child: Text(
+          messages.forgotPasswordButton,
+          style: theme.textTheme.bodyText2,
+          textAlign: TextAlign.left,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRememberMe(ThemeData theme, LoginMessages messages) {
+    return FadeIn(
+        controller: widget.loadingController,
+        fadeDirection: FadeDirection.bottomToTop,
+        offset: .5,
+        curve: _textButtonLoadingAnimationInterval,
+        child: CheckboxListTile(
+          title: Text("Remember me"), //    <-- label
+          value: true,
+          onChanged: (newValue) {},
+        ));
+  }
+
+  Widget _buildSubmitButton(
+      ThemeData theme, LoginMessages messages, Auth auth) {
+    return ScaleTransition(
+      scale: _buttonScaleAnimation,
+      child: AnimatedButton(
+        controller: _submitController,
+        text: auth.isLogin ? messages.loginButton : messages.signupButton,
+        onPressed: () => _submit(),
+      ),
+    );
+  }
+
+  Widget _buildSwitchAuthButton(ThemeData theme, LoginMessages messages,
+      Auth auth, LoginTheme loginTheme) {
+    final calculatedTextColor =
+        (theme.cardTheme.color!.computeLuminance() < 0.5)
+            ? Colors.white
+            : theme.primaryColor;
+    return FadeIn(
+      controller: widget.loadingController,
+      offset: .5,
+      curve: _textButtonLoadingAnimationInterval,
+      fadeDirection: FadeDirection.topToBottom,
+      child: MaterialButton(
+        disabledTextColor: theme.primaryColor,
+        onPressed: buttonEnabled ? _switchAuthMode : null,
+        padding: loginTheme.authButtonPadding ??
+            const EdgeInsets.symmetric(horizontal: 30.0, vertical: 8.0),
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        textColor: loginTheme.switchAuthTextColor ?? calculatedTextColor,
+        child: AnimatedText(
+          text: auth.isSignup ? messages.loginButton : messages.signupButton,
+          textRotation: AnimatedTextRotation.down,
+        ),
+      ),
+    );
+  }
+
+  // Widget _buildProvidersLogInButton(ThemeData theme, LoginMessages messages,
+  //     Auth auth, LoginTheme loginTheme) {
+  //   return Row(
+  //       mainAxisAlignment: MainAxisAlignment.center,
+  //       children: auth.loginProviders.map((loginProvider) {
+  //         var index = auth.loginProviders.indexOf(loginProvider);
+  //         return Padding(
+  //           padding: loginTheme.providerButtonPadding ??
+  //               const EdgeInsets.symmetric(horizontal: 6.0, vertical: 8.0),
+  //           child: ScaleTransition(
+  //             scale: _buttonScaleAnimation,
+  //             child: Column(
+  //               children: [
+  //                 AnimatedIconButton(
+  //                   icon: loginProvider.icon,
+  //                   controller: _providerControllerList[index],
+  //                   tooltip: '',
+  //                   onPressed: () => _loginProviderSubmit(
+  //                     animationController: _providerControllerList[index],
+  //                     loginProvider: loginProvider,
+  //                   ),
+  //                 ),
+  //                 Text(loginProvider.label),
+  //               ],
+  //             ),
+  //           ),
+  //         );
+  //       }).toList());
+  // }
+
+  Widget _buildProvidersLogInButton(ThemeData theme, LoginMessages messages,
+      Auth auth, LoginTheme loginTheme) {
+    var buttonProvidersList = <LoginProvider>[];
+    var iconProvidersList = <LoginProvider>[];
+    for (var loginProvider in auth.loginProviders) {
+      if (loginProvider.button != null) {
+        buttonProvidersList.add(LoginProvider(
+            icon: loginProvider.icon,
+            label: loginProvider.label,
+            button: loginProvider.button,
+            callback: loginProvider.callback,
+            animated: loginProvider.animated));
+      } else if (loginProvider.icon != null) {
+        iconProvidersList.add(LoginProvider(
+            icon: loginProvider.icon,
+            label: loginProvider.label,
+            button: loginProvider.button,
+            callback: loginProvider.callback,
+            animated: loginProvider.animated));
+      }
+    }
+    if (buttonProvidersList.isNotEmpty) {
+      return Column(
+        children: [
+          _buildButtonColumn(theme, messages, buttonProvidersList, loginTheme),
+          iconProvidersList.isNotEmpty
+              ? _buildProvidersTitleSecond(messages)
+              : Container(),
+          _buildIconRow(theme, messages, iconProvidersList, loginTheme),
+        ],
+      );
+    } else if (iconProvidersList.isNotEmpty) {
+      return _buildIconRow(theme, messages, iconProvidersList, loginTheme);
+    }
+    return Container();
+  }
+
+  Widget _buildButtonColumn(ThemeData theme, LoginMessages messages,
+      List<LoginProvider> buttonProvidersList, LoginTheme loginTheme) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: buttonProvidersList.map((loginProvider) {
+        return Padding(
+          padding: loginTheme.providerButtonPadding ??
+              const EdgeInsets.symmetric(horizontal: 6.0, vertical: 8.0),
+          child: ScaleTransition(
+            scale: _buttonScaleAnimation,
+            child: SignInButton(
+              loginProvider.button!,
+              onPressed: () => _loginProviderSubmit(
+                loginProvider: loginProvider,
+              ),
+              text: loginProvider.label,
+            ),
+            // child: loginProvider.button,
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildIconRow(ThemeData theme, LoginMessages messages,
+      List<LoginProvider> iconProvidersList, LoginTheme loginTheme) {
+    return Wrap(
+      children: iconProvidersList.map((loginProvider) {
+        var index = iconProvidersList.indexOf(loginProvider);
+        return Padding(
+          padding: loginTheme.providerButtonPadding ??
+              const EdgeInsets.symmetric(horizontal: 6.0, vertical: 8.0),
+          child: ScaleTransition(
+              scale: _buttonScaleAnimation,
+              child: Column(
+                children: [
+                  AnimatedIconButton(
+                    color: Colors.transparent,
+                    icon: loginProvider.icon!,
+                    controller: _providerControllerList[index],
+                    tooltip: loginProvider.label,
+                    onPressed: () => _loginProviderSubmit(
+                      control: _providerControllerList[index],
+                      loginProvider: loginProvider,
+                    ),
+                  ),
+                  Text(loginProvider.label)
+                ],
+              )),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildProvidersTitleFirst(LoginMessages messages) {
+    return ScaleTransition(
+        scale: _buttonScaleAnimation,
+        child: Row(children: <Widget>[
+          const Expanded(child: Divider()),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Text(messages.providersTitleFirst),
+          ),
+          const Expanded(child: Divider()),
+        ]));
+  }
+
+  Widget _buildProvidersTitleSecond(LoginMessages messages) {
+    return ScaleTransition(
+        scale: _buttonScaleAnimation,
+        child: Row(children: <Widget>[
+          const Expanded(child: Divider()),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Text(messages.providersTitleSecond),
+          ),
+          const Expanded(child: Divider()),
+        ]));
   }
 
   @override
   Widget build(BuildContext context) {
-    final deviceSize = MediaQuery.of(context).size;
-
-    Widget current = Container(
-      height: deviceSize.height,
-      width: deviceSize.width,
-      padding: widget.padding,
-      child: TransformerPageView(
-        physics: const NeverScrollableScrollPhysics(),
-        pageController: _pageController,
-        itemCount: 5,
-
-        /// Need to keep track of page index because soft keyboard will
-        /// make page view rebuilt
-        index: _pageIndex,
-        transformer: widget.disableCustomPageTransformer
-            ? null
-            : CustomPageTransformer(),
-        itemBuilder: (BuildContext context, int index) {
-          if (widget.scrollable) {
-            return Align(
-              alignment: Alignment.topCenter,
-              child: Scrollbar(
-                  child: SingleChildScrollView(
-                      child: _changeToCard(context, index))),
-            );
-          } else {
-            return Align(
-              alignment: Alignment.topCenter,
-              child: _changeToCard(context, index),
-            );
-          }
-        },
+    final auth = Provider.of<Auth>(context, listen: true);
+    final isLogin = auth.isLogin;
+    final messages = Provider.of<LoginMessages>(context, listen: false);
+    final loginTheme = Provider.of<LoginTheme>(context, listen: false);
+    final theme = Theme.of(context);
+    final cardWidth = min(MediaQuery.of(context).size.width * 0.75, 360.0);
+    const cardPadding = 16.0;
+    final textFieldWidth = cardWidth - cardPadding * 2;
+    final authForm = Form(
+      key: _formKey,
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.only(
+              left: cardPadding,
+              right: cardPadding,
+              top: cardPadding + 10,
+            ),
+            width: cardWidth,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                _buildUserField(textFieldWidth, messages, auth),
+                const SizedBox(height: 20),
+                _buildPasswordField(textFieldWidth, messages, auth),
+                const SizedBox(height: 10),
+              ],
+            ),
+          ),
+          ExpandableContainer(
+            backgroundColor: _switchAuthController.isCompleted
+                ? null
+                : theme.colorScheme.secondary,
+            controller: _switchAuthController,
+            initialState: isLogin
+                ? ExpandableContainerState.shrunk
+                : ExpandableContainerState.expanded,
+            alignment: Alignment.topLeft,
+            color: theme.cardTheme.color,
+            width: cardWidth,
+            padding: const EdgeInsets.symmetric(horizontal: cardPadding),
+            onExpandCompleted: () => _postSwitchAuthController.forward(),
+            child: Column(children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10.0),
+                child:
+                    _buildConfirmPasswordField(textFieldWidth, messages, auth),
+              ),
+              for (var e in auth.termsOfService)
+                TermCheckbox(
+                  termOfService: e,
+                  validation: auth.isSignup,
+                ),
+            ]),
+          ),
+          Container(
+            padding: Paddings.fromRBL(cardPadding),
+            width: cardWidth,
+            child: Column(
+              children: <Widget>[
+                !widget.hideForgotPasswordButton
+                    ? _buildForgotPassword(theme, messages)
+                    : SizedBox.fromSize(
+                        size: const Size.fromHeight(16),
+                      ),
+                _buildRememberMe(theme, messages),
+                _buildSubmitButton(theme, messages, auth),
+                !widget.hideSignUpButton
+                    ? _buildSwitchAuthButton(theme, messages, auth, loginTheme)
+                    : SizedBox.fromSize(
+                        size: const Size.fromHeight(10),
+                      ),
+                auth.loginProviders.isNotEmpty && !widget.hideProvidersTitle
+                    ? _buildProvidersTitleFirst(messages)
+                    : Container(),
+                _buildProvidersLogInButton(theme, messages, auth, loginTheme),
+              ],
+            ),
+          ),
+        ],
       ),
     );
 
-    return AnimatedBuilder(
-      animation: _cardSize2AnimationX,
-      builder: (context, snapshot) {
-        return Transform(
-          alignment: Alignment.center,
-          transform: Matrix4.identity()
-            ..rotateZ(_cardRotationAnimation.value)
-            ..scale(_cardSizeAnimation.value, _cardSizeAnimation.value)
-            ..scale(_cardSize2AnimationX.value, _cardSize2AnimationY.value),
-          child: current,
-        );
-      },
+    return FittedBox(
+      child: Card(
+        elevation: _showShadow ? theme.cardTheme.elevation : 0,
+        child: authForm,
+      ),
     );
   }
 }
