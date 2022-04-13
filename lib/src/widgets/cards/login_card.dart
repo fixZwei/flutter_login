@@ -391,6 +391,20 @@ class _LoginCardState extends State<_LoginCard> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildRememberMe(ThemeData theme, LoginMessages messages) {
+    return FadeIn(
+      controller: widget.loadingController,
+      fadeDirection: FadeDirection.bottomToTop,
+      offset: .5,
+      curve: _textButtonLoadingAnimationInterval,
+      child: CheckboxListTile(
+        title: Text("Remember me"), //    <-- label
+        value: true,
+        onChanged: (newValue) {},
+      ),
+    );
+  }
+
   Widget _buildSubmitButton(
       ThemeData theme, LoginMessages messages, Auth auth) {
     return ScaleTransition(
@@ -643,6 +657,7 @@ class _LoginCardState extends State<_LoginCard> with TickerProviderStateMixin {
                     : SizedBox.fromSize(
                         size: const Size.fromHeight(16),
                       ),
+                _buildRememberMe(theme, messages),
                 _buildSubmitButton(theme, messages, auth),
                 !widget.hideSignUpButton
                     ? _buildSwitchAuthButton(theme, messages, auth, loginTheme)
