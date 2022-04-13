@@ -643,7 +643,6 @@ class _LoginCardState extends State<_LoginCard> with TickerProviderStateMixin {
                     : SizedBox.fromSize(
                         size: const Size.fromHeight(16),
                       ),
-                          _buildSubmitButton(theme, messages, auth),
                 _buildSubmitButton(theme, messages, auth),
                 !widget.hideSignUpButton
                     ? _buildSwitchAuthButton(theme, messages, auth, loginTheme)
